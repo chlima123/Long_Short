@@ -34,6 +34,10 @@ def resolve_column(
         key = normalize_text(alias)
         if key in normalized_map:
             return normalized_map[key]
+        # Tenta casar parcialmente (ex.: "corretora1", "nomecorretora")
+        for normalized_col, original_col in normalized_map.items():
+            if key and (key in normalized_col or normalized_col in key):
+                return original_col
 
     if fallback_letter:
         idx = column_letter_to_index(fallback_letter)
@@ -44,11 +48,11 @@ def resolve_column(
 
 
 @st.cache_data(ttl=300)
-def load_sheet(spreadsheet_id: str, gid: str) -> pd.DataFrame:
+def load_sheet(spreadsheet_id: str, gid: str, header_row: int) -> pd.DataFrame:
     csv_url = (
         f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv&gid={gid}"
     )
-    return pd.read_csv(csv_url)
+    return pd.read_csv(csv_url, header=max(header_row - 1, 0))
 
 
 def main() -> None:
@@ -58,17 +62,27 @@ def main() -> None:
     with st.sidebar:
         st.subheader("Fonte")
         gid = st.text_input("GID da aba", value=DEFAULT_GID, help="Normalmente 0")
+        header_row = st.number_input(
+            "Linha do cabecalho",
+            min_value=1,
+            value=4,
+            step=1,
+            help="Padrao: linha 4. Ajuste se os titulos estiverem em outra linha.",
+        )
+        st.subheader("Fallback por letra")
+        col_letter_corretora = st.text_input("Corretora (letra da coluna)", value="")
+        col_letter_cliente = st.text_input("Cliente (letra da coluna)", value="")
         st.caption(f"Planilha: `{SPREADSHEET_ID}`")
 
     try:
-        df = load_sheet(SPREADSHEET_ID, gid)
+        df = load_sheet(SPREADSHEET_ID, gid, int(header_row))
     except Exception as exc:
         st.error(f"Nao foi possivel carregar a planilha. Detalhe: {exc}")
         st.stop()
 
     try:
-        col_corretora = resolve_column(df, ["Corretora"])
-        col_cliente = resolve_column(df, ["Cliente"])
+        col_corretora = resolve_column(df, ["Corretora"], col_letter_corretora or None)
+        col_cliente = resolve_column(df, ["Cliente"], col_letter_cliente or None)
         col_data_fecho = resolve_column(df, ["Data Fecho", "DataFecho"], "N")
         col_data_montagem = resolve_column(df, ["Data Montagem", "DataMontagem"])
         col_compra = resolve_column(df, ["Compra"])
@@ -81,7 +95,9 @@ def main() -> None:
         col_atual_ag = resolve_column(df, ["Atual"], "AG")
     except KeyError as exc:
         st.error(str(exc))
-        st.info("Revise os nomes das colunas na planilha para alinhar o app.")
+        st.info(
+            "Ajuste a linha do cabecalho e, se preciso, informe a letra da coluna para Corretora/Cliente."
+        )
         st.stop()
 
     # Operacao em aberto: coluna N/Data Fecho igual a 0.

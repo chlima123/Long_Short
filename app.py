@@ -47,6 +47,15 @@ def resolve_column(
     raise KeyError(f"Coluna nao encontrada. Aliases: {list(aliases)}")
 
 
+def normalize_numeric_text(series: pd.Series) -> pd.Series:
+    return (
+        series.astype(str)
+        .str.strip()
+        .str.replace(".", "", regex=False)
+        .str.replace(",", ".", regex=False)
+    )
+
+
 @st.cache_data(ttl=300)
 def load_sheet(spreadsheet_id: str, gid: str, header_row: int) -> pd.DataFrame:
     csv_url = (
@@ -72,6 +81,15 @@ def main() -> None:
         st.subheader("Fallback por letra")
         col_letter_corretora = st.text_input("Corretora (letra da coluna)", value="")
         col_letter_cliente = st.text_input("Cliente (letra da coluna)", value="")
+        considerar_vazio_aberto = st.checkbox(
+            "Considerar Data Fecho vazio como aberto",
+            value=True,
+        )
+        mostrar_diagnostico = st.checkbox(
+            "Mostrar diagnostico",
+            value=False,
+            help="Exibe contagem de linhas e amostra de valores de Data Fecho.",
+        )
         st.caption(f"Planilha: `{SPREADSHEET_ID}`")
 
     try:
@@ -100,10 +118,28 @@ def main() -> None:
         )
         st.stop()
 
-    # Operacao em aberto: coluna N/Data Fecho igual a 0.
-    data_fecho_num = pd.to_numeric(df[col_data_fecho], errors="coerce")
-    mask_abertas = (data_fecho_num == 0) | (df[col_data_fecho].astype(str).str.strip() == "0")
+    # Operacao em aberto: Data Fecho igual a 0. Opcionalmente, vazio tambem conta como aberto.
+    data_fecho_raw = df[col_data_fecho].astype(str).str.strip()
+    data_fecho_norm = normalize_numeric_text(df[col_data_fecho])
+    data_fecho_num = pd.to_numeric(data_fecho_norm, errors="coerce")
+    mask_zero = data_fecho_num == 0
+    mask_text_zero = data_fecho_raw.isin(["0", "0,0", "0,00", "0.0", "0.00"])
+    mask_vazio = data_fecho_raw.isin(["", "nan", "None", "NaT"])
+    mask_abertas = mask_zero | mask_text_zero | (mask_vazio if considerar_vazio_aberto else False)
     abertas = df.loc[mask_abertas].copy()
+
+    if mostrar_diagnostico:
+        st.info(
+            f"Total linhas: {len(df)} | Abertas: {len(abertas)} | "
+            f"Fechadas: {len(df) - len(abertas)}"
+        )
+        amostra = (
+            data_fecho_raw.value_counts(dropna=False)
+            .head(15)
+            .rename_axis("Data Fecho (bruto)")
+            .reset_index(name="Qtd")
+        )
+        st.dataframe(amostra, use_container_width=True, hide_index=True)
 
     corretoras = sorted(
         value for value in abertas[col_corretora].dropna().astype(str).str.strip().unique() if value

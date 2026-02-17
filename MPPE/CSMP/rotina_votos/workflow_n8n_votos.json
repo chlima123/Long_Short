@@ -1,0 +1,180 @@
+{
+  "name": "Outlook VOTOS DOCX->PDF->Encaminhar",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Email Trigger (IMAP Outlook)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [260, 300],
+      "parameters": {
+        "mailbox": "INBOX",
+        "postProcessAction": "nothing",
+        "downloadAttachments": true,
+        "options": {
+          "allowUnauthorizedCerts": false
+        }
+      },
+      "credentials": {
+        "imap": {
+          "id": "SEU_ID_CREDENCIAL_IMAP",
+          "name": "Outlook IMAP"
+        }
+      }
+    },
+    {
+      "id": "2",
+      "name": "Assunto contém VOTOS?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.subject || $json.headers?.subject || ''}}",
+              "operation": "contains",
+              "value2": "VOTOS"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "3",
+      "name": "Filtrar anexos DOCX",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 220],
+      "parameters": {
+        "language": "javascript",
+        "jsCode": "const out = [];\nfor (const item of items) {\n  const binaries = item.binary || {};\n  for (const [key, file] of Object.entries(binaries)) {\n    const name = (file.fileName || '').toLowerCase();\n    if (!name.endsWith('.docx')) continue;\n\n    const uid = `${Date.now()}_${Math.random().toString(36).slice(2,8)}`;\n    const originalName = file.fileName;\n    const baseName = originalName.replace(/\\.docx$/i, '');\n\n    out.push({\n      json: {\n        originalName,\n        docxPath: `/tmp/${uid}_${originalName}`,\n        pdfPath: `/tmp/${uid}_${baseName}.pdf`\n      },\n      binary: { data: file }\n    });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "4",
+      "name": "Salvar DOCX em /tmp",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [1010, 220],
+      "parameters": {
+        "fileName": "={{$json.docxPath}}",
+        "dataPropertyName": "data"
+      }
+    },
+    {
+      "id": "5",
+      "name": "Converter DOCX para PDF (Python)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1260, 220],
+      "parameters": {
+        "command": "python3 /opt/n8n/scripts/docx_to_pdf.py \"{{$json.docxPath}}\" \"{{$json.pdfPath}}\""
+      }
+    },
+    {
+      "id": "6",
+      "name": "Ler PDF gerado",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [1500, 220],
+      "parameters": {
+        "filePath": "={{$json.pdfPath}}",
+        "dataPropertyName": "pdf"
+      }
+    },
+    {
+      "id": "7",
+      "name": "Enviar para charles",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1740, 220],
+      "parameters": {
+        "fromEmail": "john.sh.watson@outlook.com",
+        "toEmail": "charles.santos.lima@gmail.com",
+        "subject": "={{`PDF convertido - ${$json.originalName}`}}",
+        "text": "Segue em anexo o PDF convertido automaticamente.",
+        "attachments": "pdf"
+      },
+      "credentials": {
+        "smtp": {
+          "id": "SEU_ID_CREDENCIAL_SMTP",
+          "name": "Outlook SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Email Trigger (IMAP Outlook)": {
+      "main": [
+        [
+          {
+            "node": "Assunto contém VOTOS?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assunto contém VOTOS?": {
+      "main": [
+        [
+          {
+            "node": "Filtrar anexos DOCX",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Filtrar anexos DOCX": {
+      "main": [
+        [
+          {
+            "node": "Salvar DOCX em /tmp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar DOCX em /tmp": {
+      "main": [
+        [
+          {
+            "node": "Converter DOCX para PDF (Python)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converter DOCX para PDF (Python)": {
+      "main": [
+        [
+          {
+            "node": "Ler PDF gerado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler PDF gerado": {
+      "main": [
+        [
+          {
+            "node": "Enviar para charles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
